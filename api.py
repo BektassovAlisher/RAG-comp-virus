@@ -1,14 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from rag import build_rag_chain
-
+from rag import rag_chain 
 app = FastAPI(title="RAG API")
-
-try:
-    qa_chain = build_rag_chain()
-except Exception as e:
-    print(f"Ошибка инициализации: {e}")
-    qa_chain = None
 
 
 class Question(BaseModel):
@@ -22,11 +15,11 @@ class Answer(BaseModel):
 @app.post("/ask", response_model=Answer)
 def ask(request: Question):
     
-    if qa_chain is None:
+    if rag_chain is None:
         raise HTTPException(status_code=503, detail="RAG система не инициализирована")
     
     try:
-        answer = qa_chain.invoke(request.query)
+        answer = rag_chain.invoke(request.query)
         return Answer(answer=answer)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

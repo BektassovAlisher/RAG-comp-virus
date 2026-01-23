@@ -1,145 +1,99 @@
-import os
-import shutil
-from langchain_community.llms import Ollama
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers.string import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.llms import Ollama
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 
-PDF_PATH = "doc/virus-book.pdf"
-DB_PATH = "chroma_db"
 
-def load_pdf_documents(pdf_path):
-    """Загрузка и разбивка PDF на оптимальные чанки для Qwen-1.5B"""
-    if not os.path.exists(pdf_path):
-        raise FileNotFoundError(f"PDF файл не найден: {pdf_path}")
-    
-    print(f"Processing PDF: {pdf_path}...")
-    loader = PyPDFLoader(pdf_path)
-    pdf = loader.load()
-    
-  
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,      
-        chunk_overlap=50,    
-        separators=["\n\n", "\n", ".", "!", "?", ";", " "]
-    )
-    return splitter.split_documents(pdf)
 
-def create_embedding():
-    """Инициализация легковесной модели эмбеддингов"""
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'}, 
-        encode_kwargs={'normalize_embeddings': True}
-    )
+PDF_PATH = "doc/virus.pdf"
+base_embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+llm = Ollama(
+    model="qwen2.5:3b",
+    temperature=0.0,
+    num_ctx=4096,
+)
+loader = PyPDFLoader(PDF_PATH)
+document = loader.load()
 
-def initialize_vectorstore(pdf_path, persist_dir, force_recreate=False):
-    """Создание или загрузка векторной базы данных"""
-    embedding = create_embedding()
-    
-    if force_recreate and os.path.exists(persist_dir):
-        print(f"Удаление старой базы данных в {persist_dir}...")
-        shutil.rmtree(persist_dir)
+for doc in document:
+    doc.page_content = doc.page_content.replace('\n', ' ').replace('  ', ' ')
 
-    if os.path.exists(persist_dir) and not force_recreate:
-        print(f"Загрузка существующего векторного хранилища из {persist_dir}")
-        return Chroma(persist_directory=persist_dir, embedding_function=embedding)
-    
-    print(f"Создание нового векторного хранилища...")
-    docs = load_pdf_documents(pdf_path)
-    print(f"Загружено документов: {len(docs)}")
-    
-    vectorstore = Chroma.from_documents(
-        documents=docs,
-        embedding=embedding,
-        persist_directory=persist_dir
-    )
-    return vectorstore
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=600,
+    chunk_overlap=150,
+    separators=["\n\n", ". ", " ", ""]
+)
+docs = text_splitter.split_documents(document)
 
-def build_rag_chain(persist_dir="chroma_db", k=4):
-    """Сборка RAG цепочки с улучшенным промптом"""
-    
-    llm = Ollama(
-        model="qwen2:1.5b",
-        temperature=0.1,     
-        num_ctx=4096,        
-        keep_alive="5m"     
-    )
-    
-    embedding = create_embedding()
-    db = Chroma(persist_directory=persist_dir, embedding_function=embedding)
-    
-    retriever = db.as_retriever(search_kwargs={"k": k})
+vectorstore = Chroma.from_documents(
+    docs,
+    collection_name="viruses",
+    embedding=base_embeddings,
+    persist_directory="./chroma_db"
+)
+retriever = vectorstore.as_retriever(search_kwargs= {"k": 4})
 
-    template = """You are a strict Data Analyst. Use ONLY the CONTEXT below to answer the QUESTION.
 
-### CONTEXT:
+bm25_retriever = BM25Retriever.from_documents(docs)
+bm25_retriever.k = 4
+
+ensemble_retriever = EnsembleRetriever(
+    retrievers=[bm25_retriever, retriever],
+    weights=[0.4, 0.6] 
+)
+
+
+def format_docs(docs):
+    if not docs:
+        return "Контекст пуст"
+    formatted = []
+    for i, d in enumerate(docs):
+        # Добавляем номер страницы из метаданных PDF
+        page_num = d.metadata.get("page", 0) + 1
+        formatted.append(f"--- ФРАГМЕНТ №{i+1} (Страница {page_num}) ---\n{d.page_content}")
+    return "\n\n".join(formatted)
+
+template = """Ты — эксперт по информационной безопасности. Твоя задача — отвечать на вопросы по лекции «Компьютерные вирусы и антивирусные программы».
+
+ПРАВИЛА:
+1. Отвечай ТОЛЬКО на основе КОНТЕКСТА.
+2. Если информации нет — ответь: "В предоставленных фрагментах информация не найдена".
+3. Используй ТОЛЬКО русский язык.
+4. Забудь всё, что ты знаешь о вирусах из интернета. Используй только предоставленный текст".
+5. Будь точным и кратким.
+
+КОНТЕКСТ:
 {context}
 
-### QUESTION:
-{question}
+ВОПРОС: {question}
 
-### INSTRUCTIONS:
-1. **Strict Source:** Answer using ONLY the information from the Context. Do not use outside knowledge.
-2. **Analysis:** If comparing viruses, look for keywords like "damage", "year", or "type".
-3. **Format:** Keep the answer concise and professional.
-4. **No Data:** If the answer is not in the Context, reply exactly: "I don't have enough data in the provided context."
+ОТВЕТ (строго на русском, со ссылкой на источник):"""
 
-### ANSWER:"""
+prompt = ChatPromptTemplate.from_template(template)
 
-    prompt = ChatPromptTemplate.from_template(template)
-
-    def format_docs(docs):
-        return "\n\n".join([doc.page_content for doc in docs])
-
-    rag_chain = (
-        {
-            "context": retriever | format_docs,
-            "question": RunnablePassthrough()
-        }
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-
-    return rag_chain
+rag_chain = (
+    {"context": ensemble_retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
 
 if __name__ == "__main__":
-    try:
-        # Шаг 1: Инициализация базы (force_recreate=True при первом запуске, если изменили PDF)
-        print("=" * 50)
-        initialize_vectorstore(
-            PDF_PATH,
-            DB_PATH,
-            force_recreate=False # Поставьте True, если заменили файл virus-book.pdf
-        )
+    questions = [
+        "Объясни Dr Web",
+        "Из скольки частей состоит Антивирусная программа?"
         
-        # Шаг 2: Создание цепочки
-        print("=" * 50)
-        chain = build_rag_chain(DB_PATH)
-        
-        # Тестовые вопросы
-        questions = [
-            "What is the most dangerous virus mentioned?",
-            "List the infection methods for email viruses.",
-            "What happened in 1999?"
-        ]
-        
-        print("\n" + "=" * 50)
-        for question in questions:
-            print(f"\n❓ Вопрос: {question}")
-            print("-" * 50)
-            
-            # Streaming вывод для ощущения скорости (появляется по словам)
-            full_response = ""
-            for chunk in chain.stream(question):
-                print(chunk, end="", flush=True)
-                full_response += chunk
-            print("\n")
-            
-    except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
+
+    ]
+
+    for q in questions:
+        print(f"\n--- ПОИСК ДЛЯ ВОПРОСА: {q} ---")
+        response = rag_chain.invoke(q)
+        print(f"Ответ: {response}")
+        print("-" * 60)

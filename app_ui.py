@@ -3,12 +3,12 @@ import requests
 
 API_URL = "http://localhost:8000"
 
-st.set_page_config(page_title="Virus Knowledge Base RAG", page_icon="🦠")
+st.set_page_config(page_title="RAG")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.title("🦠 Virus Knowledge Base RAG System")
+st.title("RAG на базе Компьютерных Вирусов")
 
 # Проверка API
 try:
@@ -16,7 +16,7 @@ try:
     api_online = True
 except:
     api_online = False
-    st.error("⚠️ API не запущен. Запустите: `python rag.py`")
+    st.error("⚠️ API не запущен. Запустите: `python api.py`")
 
 # Чат
 for message in st.session_state.messages:
