@@ -1,6 +1,6 @@
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
@@ -9,6 +9,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from typing import List
+#from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+#from langchain_community.document_compressors import FlashrankRerank
 
 PDF_PATH = "doc/virus.pdf"
 
@@ -16,7 +18,7 @@ base_embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 )
 
-llm = Ollama(
+llm = OllamaLLM(
     model="qwen2.5:3b",
     temperature=0.1,
     num_ctx=4096,
@@ -53,7 +55,7 @@ def reciprocal_rank_fusion(docs_lists: List[List[Document]], k=6, c=60) -> List[
     
     for docs in docs_lists:
         for rank, doc in enumerate(docs):
-            doc_id = doc.page_content[:200]  # Используем начало текста как ID
+            doc_id = doc.page_content[:200] 
             score = 1 / (rank + c)
             
             if doc_id in doc_scores:
@@ -80,6 +82,13 @@ def format_docs(docs):
         page_num = d.metadata.get("page", 0) + 1
         formatted.append(f"--- ФРАГМЕНТ №{i+1} (Страница {page_num}) ---\n{d.page_content}")
     return "\n\n".join(formatted)
+
+#compressor = FlashrankRerank(model="ms-marco-MultiBERT-L-12", top_n = 3)
+#ontextual_retirever = ContextualCompressionRetriever(
+    #base_compressor = compressor,
+    #base_retriever = ensemble_retriever
+#)
+
 
 template = """Ты — эксперт по информационной безопасности. Твоя задача — отвечать на вопросы по лекции «Компьютерные вирусы и антивирусные программы».
 
@@ -108,9 +117,10 @@ rag_chain = (
 
 if __name__ == "__main__":
     questions = [
-        "какие есть Виды вирусоподобных программ?",
-        "из скольки частей состоит антивирусная программа? и объясни их",
-        "Факторы определяющие качество антивирусных программ"
+
+        "По среде обитания вирусы делятся на?",
+        "что такое загрузочный вирус?",
+        "когда появились первые конструкторы вирусов?"
     ]
 
     for q in questions:
