@@ -5,8 +5,10 @@ from ragas.metrics import faithfulness, answer_relevancy, context_precision, con
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from rag import rag_chain, ensemble_retriever, llm, base_embeddings
+from langchain_ollama import OllamaLLM
 
-evaluator_llm = LangchainLLMWrapper(llm)
+
+evaluator_llm = OllamaLLM(model="qwen2.5:3b", temperature=0.0)
 evaluator_embeddings = LangchainEmbeddingsWrapper(base_embeddings)
 
 questions = [

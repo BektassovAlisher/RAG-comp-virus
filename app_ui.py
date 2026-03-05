@@ -10,7 +10,6 @@ if "messages" not in st.session_state:
 
 st.title("RAG на базе Компьютерных Вирусов")
 
-# Проверка API
 try:
     requests.get(f"{API_URL}/health", timeout=2)
     api_online = True
@@ -18,7 +17,7 @@ except:
     api_online = False
     st.error("⚠️ API не запущен. Запустите: `python api.py`")
 
-# Чат
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
