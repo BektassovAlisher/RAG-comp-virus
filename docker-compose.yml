@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # FastAPI backend service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-security-api
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - CHROMA_PATH=/app/chroma_db
+      - PDF_PATH=/app/doc/virus.pdf
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./doc:/app/doc
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    command: python app/api/main.py
+
+  # Streamlit UI frontend service
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-security-ui
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ./doc:/app/doc
+      - ./ragas_results.csv:/app/ragas_results.csv
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+    restart: unless-stopped
+    command: streamlit run app/ui/main.py --server.port=8501 --server.address=0.0.0.0

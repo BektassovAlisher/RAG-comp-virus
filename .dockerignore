@@ -1,0 +1,12 @@
+.git
+.gitignore
+.DS_Store
+venv/
+__pycache__/
+chroma_db/
+ragas_results.csv
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+*.ipynb
